@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local editor/agent runtime state and machine-specific configuration
+.cursor/hooks/state/
+.kilo/agent-manager.json
+.kilo/kilo.jsonc

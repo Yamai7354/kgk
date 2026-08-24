@@ -1,0 +1,69 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "knowledge-graph-kernel"
+version = "1.0.0"
+description = "A modular, event-sourced Knowledge Graph Kernel library with temporal modeling, epistemic perspectives, persistent storage, and downstream client frameworks."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Randy" }]
+dependencies = [
+    "pydantic==2.10.6",
+    "fastapi==0.115.6",
+    "uvicorn==0.34.0",
+]
+
+[project.scripts]
+kgk = "cli.main:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.5",
+    "pytest-asyncio==0.25.3",
+    "httpx==0.28.1",
+    "ruff==0.9.9",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "models",
+    "ingestion",
+    "retrieval",
+    "provenance",
+    "retraction",
+    "consolidation",
+    "graph",
+    "embeddings",
+    "api",
+    "events",
+    "namespaces",
+    "entities",
+    "ontology",
+    "temporal",
+    "epistemic",
+    "conflicts",
+    "drivers",
+    "storage",
+    "clients",
+    "cli",
+]
+
+[tool.hatch.build.targets.wheel.force-include]
+"kernel.py" = "kernel.py"
+"kgk.py" = "kgk.py"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
