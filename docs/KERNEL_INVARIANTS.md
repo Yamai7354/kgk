@@ -7,9 +7,9 @@
 
 ---
 
-## The 10 Invariants of Knowledge
+## The Invariants of Knowledge
 
-These 10 laws are non-negotiable architectural invariants governing all KGK modules, storage backends, and extensions.
+These laws are non-negotiable architectural invariants governing all KGK modules, storage backends, and extensions.
 
 ### 1. Statements Never Disappear
 Once a statement is asserted and recorded in the event history, it cannot be deleted. All queries against historical snapshots will observe the fact as it existed.
@@ -41,3 +41,6 @@ Inferred or derived statements must explicitly reference their derivation lineag
 
 ### 10. Storage Implementations Cannot Change KGK Semantics
 Any storage backend (in-memory, relational, graph database, vector store) serves strictly as a projectable query view. The authoritative truth remains the ordered event stream.
+
+### 11. Namespace Capabilities Bound Application Access
+Supported application reads and writes operate through a registered namespace capability. A namespace may read deliberately inherited parent knowledge, but it cannot read or mutate sibling knowledge and cannot mutate inherited parent knowledge. Authentication and capability assignment remain the host application's responsibility.

@@ -50,3 +50,6 @@ When interacting with the database, you have two primary methods:
 - Historical representations and current projections are separate concepts.
 - Graph storage implementations MUST conform to `GraphStore`.
 - Embedding implementations MUST conform to `EmbeddingStore`.
+- Application-facing access MUST use `KnowledgeGraphKernel.scope(...)`; direct store access is an administrative/internal boundary.
+- Non-global namespaces MUST be registered through `KnowledgeGraphKernel.register_namespace(...)` so their hierarchy survives restart.
+- Reads and mutations MUST NOT cross sibling namespace boundaries. Inherited parent knowledge is readable but is not writable through a child capability.

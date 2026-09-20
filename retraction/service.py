@@ -39,13 +39,18 @@ class RetractionService:
         *,
         source: str = "retraction-service",
         actor: str = "system",
-        namespace: str = "global",
+        namespace: str | None = None,
     ) -> RetractionResult:
         statement = self._store.get_statement(statement_id)
         if statement is None:
             raise KeyError(f"Statement not found: {statement_id}")
         if statement.status != StatementStatus.ACTIVE:
             raise ValueError(f"Statement {statement_id} is already {statement.status.value}")
+        event_namespace = namespace or statement.namespace
+        if event_namespace != statement.namespace:
+            raise PermissionError(
+                f"Cannot retract statement in {statement.namespace!r} through {event_namespace!r}"
+            )
 
         # 1. Authoritative Event
         if self._events is not None:
@@ -53,7 +58,7 @@ class RetractionService:
                 KnowledgeEvent(
                     event_type=EventType.RETRACT,
                     target_id=statement_id,
-                    namespace=namespace,
+                    namespace=event_namespace,
                     actor=actor,
                     reason=reason,
                     payload={"statement_id": statement_id},
@@ -84,11 +89,14 @@ class RetractionService:
         *,
         source: str = "retraction-service",
         actor: str = "system",
-        namespace: str = "global",
+        namespace: str | None = None,
     ) -> tuple[Statement, Statement]:
         old = self._store.get_statement(old_statement_id)
         if old is None:
             raise KeyError(f"Statement not found: {old_statement_id}")
+        event_namespace = namespace or old.namespace
+        if event_namespace != old.namespace or new_statement.namespace != old.namespace:
+            raise PermissionError("Supersession cannot cross namespace boundaries")
 
         # 1. Authoritative Event
         if self._events is not None:
@@ -96,7 +104,7 @@ class RetractionService:
                 KnowledgeEvent(
                     event_type=EventType.SUPERSEDE,
                     target_id=old_statement_id,
-                    namespace=namespace,
+                    namespace=event_namespace,
                     actor=actor,
                     reason=reason,
                     payload={

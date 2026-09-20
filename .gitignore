@@ -9,6 +9,9 @@ build/
 .mypy_cache/
 .coverage
 htmlcov/
+.tmp/
+data/
+*.db
 
 # Local editor/agent runtime state and machine-specific configuration
 .cursor/hooks/state/

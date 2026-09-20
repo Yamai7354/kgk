@@ -5,16 +5,13 @@ import sys
 from epistemic.models import EpistemicStatus
 from kernel import KnowledgeGraphKernel
 from models import EntityCreate, RelationCreate, StatementCreate
+from namespaces import Namespace
 from provenance.models import ProvenanceRecord
-from storage.sqlite.event_store import SqliteEventStore
-from storage.sqlite.graph_store import SqliteGraphStore
 
 
 def get_kernel(db_path: str | None = None) -> KnowledgeGraphKernel:
     if db_path:
-        store = SqliteGraphStore(db_path)
-        events = SqliteEventStore(db_path)
-        return KnowledgeGraphKernel(store=store, events=events)
+        return KnowledgeGraphKernel.persistent(db_path)
     return KnowledgeGraphKernel()
 
 
@@ -25,7 +22,8 @@ def handle_ingest(args: argparse.Namespace, kgk: KnowledgeGraphKernel) -> int:
         authority=args.authority,
     )
     status = EpistemicStatus(args.status) if args.status else EpistemicStatus.FACT
-    res = kgk.ingest(
+    scope = kgk.scope(args.namespace, actor="cli")
+    res = scope.ingest(
         StatementCreate(
             subject=EntityCreate(label=args.subject, namespace=args.namespace),
             relation=RelationCreate(label=args.relation, namespace=args.namespace),
@@ -44,7 +42,9 @@ def handle_ingest(args: argparse.Namespace, kgk: KnowledgeGraphKernel) -> int:
 
 
 def handle_retract(args: argparse.Namespace, kgk: KnowledgeGraphKernel) -> int:
-    res = kgk.retract(args.statement_id, reason=args.reason)
+    res = kgk.scope(args.namespace, actor="cli").retract(
+        args.statement_id, reason=args.reason
+    )
     if res.statement:
         print(f"[OK] Retracted Statement: {res.statement.id}")
         print(f"     Reason: {res.statement.retraction_reason}")
@@ -55,11 +55,10 @@ def handle_retract(args: argparse.Namespace, kgk: KnowledgeGraphKernel) -> int:
 
 def handle_search(args: argparse.Namespace, kgk: KnowledgeGraphKernel) -> int:
     vector = [float(x.strip()) for x in args.vector.split(",")] if args.vector else None
-    results = kgk.search_hybrid(
+    results = kgk.scope(args.namespace, actor="cli").search_hybrid(
         query_text=args.query,
         query_vector=vector,
         top_k=args.top_k,
-        namespaces=args.namespace,
     )
     print(f"--- Search Results ({len(results)} matches) ---")
     for idx, r in enumerate(results, start=1):
@@ -70,7 +69,9 @@ def handle_search(args: argparse.Namespace, kgk: KnowledgeGraphKernel) -> int:
 
 
 def handle_path(args: argparse.Namespace, kgk: KnowledgeGraphKernel) -> int:
-    paths = kgk.find_paths(args.start, args.end, max_depth=args.max_depth)
+    paths = kgk.scope(args.namespace, actor="cli").find_paths(
+        args.start, args.end, max_depth=args.max_depth
+    )
     print(f"--- Found {len(paths)} paths from {args.start} to {args.end} ---")
     for idx, path in enumerate(paths, start=1):
         chain_str = " -> ".join(
@@ -81,13 +82,28 @@ def handle_path(args: argparse.Namespace, kgk: KnowledgeGraphKernel) -> int:
 
 
 def handle_format(args: argparse.Namespace, kgk: KnowledgeGraphKernel) -> int:
-    output = kgk.format_neighborhood(
+    output = kgk.scope(args.namespace, actor="cli").format_neighborhood(
         args.entity, depth=args.depth, format_type=args.format, max_chars=args.max_chars
     )
     if isinstance(output, list):
         print(json.dumps(output, indent=2))
     else:
         print(output)
+    return 0
+
+
+def handle_namespace_register(args: argparse.Namespace, kgk: KnowledgeGraphKernel) -> int:
+    namespace = kgk.register_namespace(
+        Namespace(
+            id=args.namespace_id,
+            parent_id=args.parent,
+            description=args.description,
+            is_read_only=args.read_only,
+        ),
+        actor="cli",
+    )
+    print(f"[OK] Registered Namespace: {namespace.id}")
+    print(f"     Parent: {namespace.parent_id or '(none)'}")
     return 0
 
 
@@ -131,19 +147,21 @@ def main(argv: list[str] | None = None) -> int:
     p_retract = subparsers.add_parser("retract", help="Retract a statement")
     p_retract.add_argument("statement_id", help="ID of statement to retract")
     p_retract.add_argument("--reason", "-m", required=True, help="Reason for retraction")
+    p_retract.add_argument("--namespace", "-n", default="global", help="Namespace")
 
     # Search
     p_search = subparsers.add_parser("search", help="Hybrid search entities")
     p_search.add_argument("--query", "-q", default=None, help="Text search query")
     p_search.add_argument("--vector", "-v", default=None, help="Comma-separated vector floats")
     p_search.add_argument("--top-k", "-k", type=int, default=10, help="Max results")
-    p_search.add_argument("--namespace", "-n", default=None, help="Namespace filter")
+    p_search.add_argument("--namespace", "-n", default="global", help="Namespace capability")
 
     # Path
     p_path = subparsers.add_parser("path", help="Find relation paths between entities")
     p_path.add_argument("--start", required=True, help="Start entity ID")
     p_path.add_argument("--end", required=True, help="End entity ID")
     p_path.add_argument("--max-depth", type=int, default=3, help="Max path hops")
+    p_path.add_argument("--namespace", "-n", default="global", help="Namespace capability")
 
     # Format
     p_format = subparsers.add_parser("format", help="Format subgraph for prompt context")
@@ -156,6 +174,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Output format",
     )
     p_format.add_argument("--max-chars", type=int, default=4000, help="Max output characters")
+    p_format.add_argument("--namespace", "-n", default="global", help="Namespace capability")
+
+    # Namespace registration
+    p_namespace = subparsers.add_parser("namespace", help="Register a durable namespace")
+    p_namespace.add_argument("namespace_id", help="Namespace id, such as project:ape")
+    p_namespace.add_argument("--parent", default="global", help="Parent namespace")
+    p_namespace.add_argument("--description", default=None, help="Namespace description")
+    p_namespace.add_argument("--read-only", action="store_true", help="Reject scoped writes")
 
     # Replay
     subparsers.add_parser("replay", help="Replay event log to rebuild graph store")
@@ -166,21 +192,25 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     kgk = get_kernel(parsed.db)
+    try:
+        if parsed.command == "ingest":
+            return handle_ingest(parsed, kgk)
+        elif parsed.command == "retract":
+            return handle_retract(parsed, kgk)
+        elif parsed.command == "search":
+            return handle_search(parsed, kgk)
+        elif parsed.command == "path":
+            return handle_path(parsed, kgk)
+        elif parsed.command == "format":
+            return handle_format(parsed, kgk)
+        elif parsed.command == "replay":
+            return handle_replay(parsed, kgk)
+        elif parsed.command == "namespace":
+            return handle_namespace_register(parsed, kgk)
 
-    if parsed.command == "ingest":
-        return handle_ingest(parsed, kgk)
-    elif parsed.command == "retract":
-        return handle_retract(parsed, kgk)
-    elif parsed.command == "search":
-        return handle_search(parsed, kgk)
-    elif parsed.command == "path":
-        return handle_path(parsed, kgk)
-    elif parsed.command == "format":
-        return handle_format(parsed, kgk)
-    elif parsed.command == "replay":
-        return handle_replay(parsed, kgk)
-
-    return 0
+        return 0
+    finally:
+        kgk.close()
 
 
 if __name__ == "__main__":

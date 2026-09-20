@@ -1,12 +1,20 @@
-# Knowledge Graph Kernel (KGK) v1.0
+# Knowledge Graph Kernel (KGK) v1.1
 
-[![Tests](https://img.shields.io/badge/tests-55%20passed-brightgreen.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > **"KGK owns the laws of knowledge. Applications own what the knowledge means."**
 
-KGK is an event-sourced, bi-temporal, multi-tenant Knowledge Graph Kernel designed as a foundational infrastructure library for AI agent memory, character lore, project graphs, and autonomous intelligence systems.
+KGK is an event-sourced, bi-temporal, namespace-partitioned Knowledge Graph Kernel for durable AI agent memory, character lore, project graphs, and autonomous intelligence systems. Hosts authenticate callers and issue namespace capabilities; KGK enforces those capabilities across its supported knowledge operations.
+
+## Project navigation
+
+- [Project Charter](docs/PROJECT_CHARTER.md) — the destination and ownership boundary
+- [Project Status](docs/PROJECT_STATUS.md) — intended versus current reality
+- [System Map](docs/SYSTEM_MAP.md) — components, state, and cross-project flow
+- [Course Log](docs/COURSE_LOG.md) — meaningful changes in project direction
+- [Kernel Invariants](docs/KERNEL_INVARIANTS.md) — non-negotiable knowledge laws
+- [User and Developer Guide](docs/USER_GUIDE.md) — usage details
 
 ---
 
@@ -21,6 +29,7 @@ KGK is an event-sourced, bi-temporal, multi-tenant Knowledge Graph Kernel design
 7. **Document Drivers & Span Provenance**: Ingests raw text, markdown key-values, regex patterns, or JSON entity cards with character/line span citations.
 8. **ACID Storage Backends**: Ships with ephemeral In-Memory and persistent SQLite graph and event stores with live migration.
 9. **Domain Client Layer**: High-level character canon clients (e.g. `MinaCanonClient`) demonstrate application-specific authority tiers.
+10. **Durable Namespace Capabilities**: Registered namespace hierarchies survive restart, constrain reads and writes, and support deliberate parent inheritance without exposing sibling knowledge.
 
 ---
 
@@ -34,7 +43,7 @@ KGK is an event-sourced, bi-temporal, multi-tenant Knowledge Graph Kernel design
         │                       │                       │
         └───────────────────────┴───────────────────────┘
                                 │
-                    KnowledgeGraphKernel (v1.0)
+                    KnowledgeGraphKernel (v1.1)
                                 │
    ┌────────────┬───────────────┼───────────────┬────────────┐
    ▼            ▼               ▼               ▼            ▼
@@ -58,28 +67,32 @@ uv pip install -e .
 
 ```python
 import kgk
-from kgk import KnowledgeGraphKernel, StatementCreate, ProvenanceRecord, EpistemicStatus
+from kgk import KnowledgeGraphKernel, Namespace, StatementCreate, ProvenanceRecord, EpistemicStatus
 
-# 1. Initialize Kernel
-kernel = KnowledgeGraphKernel()
+# 1. Open one durable local composition
+kernel = KnowledgeGraphKernel.persistent("data/kgk.db")
 
-# 2. Ingest Fact with Provenance
-result = kernel.ingest(
+# 2. Register once, then obtain a project-scoped capability
+kernel.register_namespace(Namespace(id="project:ape", parent_id="global"))
+ape_knowledge = kernel.scope("project:ape", actor="ape-runtime")
+
+# 3. Ingest knowledge through that capability
+result = ape_knowledge.ingest(
     StatementCreate(
-        subject={"label": "Mina Park", "type": "Character"},
-        relation={"label": "lives_in"},
-        object={"label": "Neo-Tokyo", "type": "Location"},
+        subject={"label": "APE", "type": "Project", "namespace": "project:ape"},
+        relation={"label": "owns", "namespace": "project:ape"},
+        object={"label": "character meaning", "namespace": "project:ape"},
         provenance=ProvenanceRecord(source="creator_canon", authority=100, confidence=1.0),
-        namespace="canon",
+        namespace="project:ape",
         epistemic_status=EpistemicStatus.FACT,
     )
 )
 
-# 3. Hybrid Search & Subgraph Extraction
-search_results = kernel.search_hybrid(query_text="Neo-Tokyo", top_k=5)
-prompt_md = kernel.format_neighborhood(result.subject.id, format_type="markdown")
+# 4. Retrieval stays inside project:ape plus inherited parent knowledge
+search_results = ape_knowledge.search_hybrid(query_text="character", top_k=5)
+prompt_md = ape_knowledge.format_neighborhood(result.subject.id, format_type="markdown")
 print(prompt_md)
-# Output: - [Mina Park] --(lives_in)--> [Neo-Tokyo] (status=fact, conf=1.0, auth=100.0)
+kernel.close()
 ```
 
 ### Mina Character Canon Client
@@ -108,17 +121,18 @@ context = client.build_llm_prompt_context("Mina", max_chars=1000)
 The `kgk` command-line utility provides instant management over graphs:
 
 ```bash
-# Ingest statement
-kgk ingest -s "Mina" -r "hobby" -o "Guitar" --confidence 0.95 --db canon.db
+# Register once, then use the same durable database and namespace
+kgk --db data/kgk.db namespace project:ape
+kgk --db data/kgk.db ingest -n project:ape -s "APE" -r "owns" -o "character meaning"
 
 # Hybrid Search
-kgk search -q "Mina" --db canon.db
+kgk --db data/kgk.db search -n project:ape -q "character"
 
 # Path Finding
-kgk path --start <id1> --end <id2> --max-depth 3 --db canon.db
+kgk --db data/kgk.db path -n project:ape --start <id1> --end <id2> --max-depth 3
 
 # Replay & Verify Event Ledger
-kgk replay --db canon.db
+kgk --db data/kgk.db replay
 ```
 
 ---
@@ -135,14 +149,18 @@ kgk replay --db canon.db
 8. **Ingestion Idempotency**: Duplicate assertions reinforce confidence without edge duplication.
 9. **Explicit Conflict Lifecycle**: Contradictions are tracked as first-class entities with authority-based resolution.
 10. **Storage Subservience**: Storage engines are interchangeable projections.
+11. **Namespace Capability**: Application access is explicitly scoped; sibling namespaces cannot read or mutate each other, while configured parent knowledge may be inherited.
+
+## HTTP composition
+
+Set `KGK_DB_PATH` before starting the FastAPI application to use the durable shared SQLite composition. Every knowledge endpoint requires `X-KGK-Namespace`; hosts may also provide `X-KGK-Actor` for audit attribution. The bundled app treats those headers as trusted local input. A host exposing KGK across a trust boundary must construct the app with `create_app(..., authorize_namespace=...)` so its authentication system approves `(actor, namespace, operation)` before KGK issues the scope. Namespace registration is an administrative operation.
 
 ---
 
 ## 🧪 Testing
 
 ```bash
-uv run pytest
-# 55 passed in 1.00s (100% green)
+uv run python -m pytest
 ```
 
 ## 📄 License

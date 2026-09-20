@@ -12,11 +12,11 @@ from drivers.pipeline import DocumentPipeline
 from embeddings import EmbeddingStore, InMemoryEmbeddingStore
 from entities import EntityService
 from epistemic import AuthorityResolver, Perspective, compute_effective_confidence
-from events import EventStore, EventType, InMemoryEventStore
+from events import EventStore, EventType, InMemoryEventStore, KnowledgeEvent
 from graph import GraphStore, InMemoryGraphStore
 from ingestion import IngestionPipeline, IngestionResult
 from models import Entity, Relation, Statement, StatementCreate, StatementStatus
-from namespaces import NamespaceManager
+from namespaces import Namespace, NamespaceAccessError, NamespaceManager, NamespaceScope
 from ontology import RelationRegistry
 from provenance import ProvenanceTracker
 from retraction import RetractionResult, RetractionService
@@ -42,6 +42,7 @@ class KnowledgeGraphKernel:
 
     def __post_init__(self) -> None:
         self.namespaces = NamespaceManager()
+        self._restore_namespaces()
         self.ontology = RelationRegistry()
         self.temporal = TemporalEngine()
         self.epistemic = AuthorityResolver()
@@ -65,9 +66,72 @@ class KnowledgeGraphKernel:
         self.formatter = SubgraphFormatter()
         self.document_pipeline = DocumentPipeline(self)
 
+    @classmethod
+    def persistent(cls, db_path: str) -> "KnowledgeGraphKernel":
+        """Open one durable SQLite composition for events and graph projections."""
+        from storage.sqlite import SqliteEventStore, SqliteGraphStore
+
+        return cls(store=SqliteGraphStore(db_path), events=SqliteEventStore(db_path))
+
+    def close(self) -> None:
+        """Close storage resources owned by this kernel when supported."""
+        closed: set[int] = set()
+        for resource in (self.store, self.events):
+            if id(resource) in closed:
+                continue
+            close = getattr(resource, "close", None)
+            if callable(close):
+                close()
+                closed.add(id(resource))
+
+    def _restore_namespaces(self) -> None:
+        for event in self.events.events_by_type(EventType.NAMESPACE_REGISTER):
+            self.namespaces.register(Namespace.model_validate(event.payload))
+
+    def register_namespace(self, namespace: Namespace, *, actor: str = "system") -> Namespace:
+        """Register a namespace and preserve the registration in the event ledger."""
+        existing = self.namespaces.get(namespace.id)
+        registered = self.namespaces.register(namespace)
+        if existing is None:
+            self.events.append(
+                KnowledgeEvent(
+                    event_type=EventType.NAMESPACE_REGISTER,
+                    namespace=namespace.id,
+                    actor=actor,
+                    target_id=namespace.id,
+                    payload=namespace.model_dump(mode="json"),
+                )
+            )
+        return registered
+
+    def scope(self, namespace: str, *, actor: str = "system") -> NamespaceScope:
+        """Issue a namespace-bound capability for supported application access."""
+        return NamespaceScope(self, namespace=namespace, actor=actor)
+
     def ingest(
         self, payload: StatementCreate, strict_schema: bool | None = None
     ) -> IngestionResult:
+        self.namespaces.require(payload.namespace)
+        if not self.namespaces.is_writable(payload.namespace):
+            raise NamespaceAccessError(f"Namespace is read-only: {payload.namespace}")
+        existing_components = (
+            self.store.get_entity(payload.subject.id)
+            if isinstance(payload.subject, Entity)
+            else None,
+            self.store.get_relation(payload.relation.id)
+            if isinstance(payload.relation, Relation)
+            else None,
+            self.store.get_entity(payload.object.id)
+            if isinstance(payload.object, Entity)
+            else None,
+        )
+        if any(
+            component is not None and component.namespace != payload.namespace
+            for component in existing_components
+        ):
+            raise NamespaceAccessError(
+                "Existing statement components cannot be reused across namespace boundaries"
+            )
         result = self.ingestion.ingest(payload, strict_schema=strict_schema)
         # Automatic conflict detection for functional relations
         detected = self.conflict_detector.check_statement_conflicts(result.statement)
@@ -91,8 +155,8 @@ class KnowledgeGraphKernel:
     ) -> tuple[Statement, Statement]:
         return self.retraction.supersede(old_statement_id, new_statement, reason, **kwargs)
 
-    def merge_entities(self, canonical_id: str, duplicate_ids: list[str]):
-        return self.entities.merge(canonical_id, duplicate_ids)
+    def merge_entities(self, canonical_id: str, duplicate_ids: list[str], **kwargs):
+        return self.entities.merge(canonical_id, duplicate_ids, **kwargs)
 
     def resolve_supersession(self, statement_id: str) -> list[str]:
         return self.retraction.resolve_chain(statement_id)
@@ -122,6 +186,7 @@ class KnowledgeGraphKernel:
         max_depth: int = 3,
         directed: bool = True,
         predicate_whitelist: list[str] | None = None,
+        namespaces: str | list[str] | None = None,
     ) -> list[list[RetrievalResult]]:
         """Finds all multi-hop paths between two entities."""
         return self.path_finder.find_all_paths(
@@ -130,6 +195,7 @@ class KnowledgeGraphKernel:
             max_depth=max_depth,
             directed=directed,
             predicate_whitelist=predicate_whitelist,
+            namespaces=namespaces,
         )
 
     def shortest_path(
@@ -139,6 +205,7 @@ class KnowledgeGraphKernel:
         *,
         max_depth: int = 4,
         directed: bool = True,
+        namespaces: str | list[str] | None = None,
     ) -> list[RetrievalResult] | None:
         """Finds the shortest path of relations between two entities."""
         return self.path_finder.find_shortest_path(
@@ -146,6 +213,7 @@ class KnowledgeGraphKernel:
             end_entity_id,
             max_depth=max_depth,
             directed=directed,
+            namespaces=namespaces,
         )
 
     def format_neighborhood(
@@ -155,9 +223,10 @@ class KnowledgeGraphKernel:
         *,
         max_chars: int = 4000,
         format_type: str = "markdown",
+        namespaces: str | list[str] | None = None,
     ) -> str | list[dict[str, Any]]:
         """Extracts and formats an entity neighborhood for context windows."""
-        subgraph = self.retrieve.neighborhood(entity_id, depth=depth)
+        subgraph = self.retrieve.neighborhood(entity_id, depth=depth, namespaces=namespaces)
         if format_type == "mermaid":
             return self.formatter.format_mermaid(subgraph.statements, max_chars=max_chars)
         elif format_type == "json_ld":
@@ -188,6 +257,11 @@ class KnowledgeGraphKernel:
             results = self.query_scoped(subject_id=subject_id, namespaces=namespaces)
         else:
             all_stmts = self.store.all_statements(status=StatementStatus.ACTIVE)
+            if namespaces is not None:
+                allowed = set(
+                    [namespaces] if isinstance(namespaces, str) else namespaces
+                )
+                all_stmts = [statement for statement in all_stmts if statement.namespace in allowed]
             results = [self.retrieve._hydrate(s) for s in all_stmts]
 
         valid_results = [r for r in results if r.statement.is_valid_at(valid_at)]
@@ -211,6 +285,8 @@ class KnowledgeGraphKernel:
             else [
                 self.retrieve._hydrate(s)
                 for s in self.store.all_statements(status=StatementStatus.ACTIVE)
+                if namespaces is None
+                or s.namespace in set([namespaces] if isinstance(namespaces, str) else namespaces)
             ]
         )
         return [r for r in results if r.statement.epistemic_status in perspective.accepted_statuses]

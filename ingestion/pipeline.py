@@ -49,7 +49,9 @@ class IngestionPipeline:
         subject, subject_created = self._resolve_entity(
             payload.subject, namespace=payload.namespace
         )
-        relation, relation_created = self._resolve_relation(payload.relation)
+        relation, relation_created = self._resolve_relation(
+            payload.relation, namespace=payload.namespace
+        )
         obj, object_created = self._resolve_entity(payload.object, namespace=payload.namespace)
 
         # Validate against Relation Ontology
@@ -163,6 +165,8 @@ class IngestionPipeline:
         if isinstance(value, Entity):
             existing = self._store.get_entity(value.id)
             if existing is not None:
+                if existing.namespace != namespace:
+                    raise PermissionError("Entity cannot be reused across namespace boundaries")
                 return existing, False
 
         # If EntityService is present, attempt alias and merge resolution
@@ -198,24 +202,31 @@ class IngestionPipeline:
             )
         return entity, True
 
-    def _resolve_relation(self, value: Relation | RelationCreate) -> tuple[Relation, bool]:
+    def _resolve_relation(
+        self, value: Relation | RelationCreate, namespace: str = "global"
+    ) -> tuple[Relation, bool]:
         if isinstance(value, Relation):
             existing = self._store.get_relation(value.id)
             if existing is not None:
+                if existing.namespace != namespace:
+                    raise PermissionError("Relation cannot be reused across namespace boundaries")
                 return existing, False
 
-        # Check if relation with same label already exists
+        # Relations are reusable only inside the same namespace.
         for existing in self._store.all_relations():
-            if existing.label.lower() == value.label.lower():
+            if existing.label.lower() == value.label.lower() and existing.namespace == namespace:
                 return existing, False
 
-        relation = Relation.model_validate(value.model_dump())
+        dumped = value.model_dump()
+        dumped["namespace"] = namespace
+        relation = Relation.model_validate(dumped)
         self._store.add_relation(relation)
         if self._events is not None:
             self._events.append(
                 KnowledgeEvent(
                     event_type=EventType.RELATION_CREATE,
                     target_id=relation.id,
+                    namespace=namespace,
                     payload=relation.model_dump(mode="json"),
                 )
             )

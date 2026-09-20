@@ -35,6 +35,8 @@ class ConflictDetector:
         for s in self._store.statements_for_subject(
             statement.subject_id, status=StatementStatus.ACTIVE
         ):
+            if s.namespace != statement.namespace:
+                continue
             s_rel = self._store.get_relation(s.relation_id)
             if s_rel and s_rel.label.lower() == rel.label.lower():
                 active_stmts.append(s)

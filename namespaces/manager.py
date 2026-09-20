@@ -11,9 +11,24 @@ class NamespaceManager:
         }
 
     def register(self, namespace: Namespace) -> Namespace:
+        existing = self._namespaces.get(namespace.id)
+        if existing is not None:
+            if existing == namespace:
+                return existing
+            raise ValueError(f"Namespace already registered with different settings: {namespace.id}")
         if namespace.parent_id and namespace.parent_id not in self._namespaces:
             raise KeyError(f"Parent namespace not found: {namespace.parent_id}")
+        if namespace.id == "global" and namespace.parent_id is not None:
+            raise ValueError("The global namespace cannot have a parent")
+        if namespace.parent_id == namespace.id:
+            raise ValueError("A namespace cannot inherit from itself")
         self._namespaces[namespace.id] = namespace
+        return namespace
+
+    def require(self, namespace_id: str) -> Namespace:
+        namespace = self.get(namespace_id)
+        if namespace is None:
+            raise KeyError(f"Namespace not registered: {namespace_id}")
         return namespace
 
     def get(self, namespace_id: str) -> Namespace | None:
@@ -31,6 +46,7 @@ class NamespaceManager:
         resolved: set[str] = set()
 
         for ns_id in initial_scopes:
+            self.require(ns_id)
             current = ns_id
             visited = set()
             while current:
@@ -52,5 +68,5 @@ class NamespaceManager:
     def is_writable(self, namespace_id: str) -> bool:
         ns = self._namespaces.get(namespace_id)
         if ns is None:
-            return True  # Auto-allow unmanaged custom namespaces
+            return False
         return not ns.is_read_only
