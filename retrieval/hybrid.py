@@ -34,6 +34,7 @@ class HybridSearchEngine:
             candidate_entities = [
                 e for e in candidate_entities if getattr(e, "namespace", "global") in ns_set
             ]
+        allowed_entity_ids = {entity.id for entity in candidate_entities}
 
         lexical_ranks: dict[str, int] = {}
         if query_text:
@@ -84,6 +85,8 @@ class HybridSearchEngine:
         k_constant = 60.0
 
         for eid in all_candidate_ids:
+            if eid not in allowed_entity_ids:
+                continue
             entity = self._store.get_entity(eid)
             if entity is None or not entity.is_active:
                 continue

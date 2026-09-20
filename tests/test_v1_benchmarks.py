@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from kgk import (
     EpistemicStatus,
     KnowledgeGraphKernel,
+    Namespace,
     ProvenanceRecord,
     SqliteEventStore,
     SqliteGraphStore,
@@ -13,6 +14,7 @@ from kgk import (
 
 
 def test_v1_scale_ingestion_and_hybrid_retrieval(kgk):
+    kgk.register_namespace(Namespace(id="project_swarm", parent_id="global"))
     # Ingest 100 character nodes with connections
     for i in range(100):
         kgk.ingest(

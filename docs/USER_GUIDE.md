@@ -37,12 +37,12 @@ kgk = KnowledgeGraphKernel()
 
 ### Persistent SQLite (ACID Durability)
 ```python
-from kgk import KnowledgeGraphKernel, SqliteGraphStore, SqliteEventStore
+from kgk import KnowledgeGraphKernel
 
-store = SqliteGraphStore("knowledge.db")
-events = SqliteEventStore("knowledge.db")
-kgk = KnowledgeGraphKernel(store=store, events=events)
+kgk = KnowledgeGraphKernel.persistent("knowledge.db")
 ```
+
+The persistent constructor opens the graph projection and append-only event ledger as one KGK composition. Namespace registrations and knowledge are restored from that database after restart.
 
 ### Hot-Swapping & Live Migration
 To migrate an in-memory kernel or another store to SQLite without losing history:
@@ -57,15 +57,18 @@ kgk.migrate_to(new_sqlite_store)
 
 ### Basic Statement Ingestion
 ```python
-from kgk import StatementCreate, ProvenanceRecord, EpistemicStatus
+from kgk import Namespace, StatementCreate, ProvenanceRecord, EpistemicStatus
 
-res = kgk.ingest(
+kgk.register_namespace(Namespace(id="project:mina", parent_id="global"))
+mina_knowledge = kgk.scope("project:mina", actor="mina-runtime")
+
+res = mina_knowledge.ingest(
     StatementCreate(
-        subject={"label": "Mina", "type": "Person"},
-        relation={"label": "lives_in"},
-        object={"label": "Tokyo", "type": "City"},
+        subject={"label": "Mina", "type": "Person", "namespace": "project:mina"},
+        relation={"label": "lives_in", "namespace": "project:mina"},
+        object={"label": "Tokyo", "type": "City", "namespace": "project:mina"},
         provenance=ProvenanceRecord(source="interview", confidence=0.9, authority=80),
-        namespace="canon",
+        namespace="project:mina",
         epistemic_status=EpistemicStatus.FACT,
     )
 )
@@ -79,25 +82,29 @@ from kgk import Document, KeyValueExtractor, PatternExtractor, StructuredJsonExt
 doc = Document(
     text="role: Captain\nhometown: Neo-Tokyo",
     source_uri="file:///lore/characters/mina.txt",
+    namespace="project:mina",
     metadata={"subject": "Mina Park"}
 )
-results = kgk.ingest_document(doc, KeyValueExtractor())
+results = mina_knowledge.ingest_document(doc, KeyValueExtractor())
 ```
 
 ---
 
 ## 4. Namespaces & Scope Expansion
 
-Hierarchical namespaces allow multi-tenant isolation with selective inheritance:
+Hierarchical namespaces partition shared durable knowledge with selective inheritance. The host authenticates callers and decides which namespace capability they receive; KGK enforces that capability after it is issued.
 ```python
 from kgk import Namespace
 
-# Register hierarchy: 'mina' inherits from 'global'
-kgk.namespaces.register(Namespace(id="mina", parent_id="global"))
+# Register durably: project:mina inherits global knowledge
+kgk.register_namespace(Namespace(id="project:mina", parent_id="global"))
 
-# Query scoped knowledge (automatically resolves 'mina' + 'global')
-results = kgk.query_scoped(subject_id=entity_id, namespaces="mina")
+# The scoped capability reads project:mina + global and writes only project:mina
+mina_knowledge = kgk.scope("project:mina", actor="mina-runtime")
+results = mina_knowledge.query(subject_id=entity_id)
 ```
+
+Sibling namespaces are not visible. Inherited parent knowledge is readable but cannot be retracted, superseded, merged, or otherwise changed through a child capability. Direct graph-store access is reserved for administrative and storage implementation work.
 
 ---
 
@@ -201,18 +208,19 @@ prompt = client.build_llm_prompt_context("Mina", max_chars=1500)
 ## 10. Command-Line Interface (CLI)
 
 ```bash
-# Ingest
-kgk ingest -s "Mina" -r "lives_in" -o "Tokyo" --confidence 0.95 --db knowledge.db
+# Register once, then ingest
+kgk --db knowledge.db namespace project:mina
+kgk --db knowledge.db ingest -n project:mina -s "Mina" -r "lives_in" -o "Tokyo" --confidence 0.95
 
 # Retract
-kgk retract <statement_id> -m "Fact outdated" --db knowledge.db
+kgk --db knowledge.db retract -n project:mina <statement_id> -m "Fact outdated"
 
 # Search
-kgk search -q "Tokyo" --db knowledge.db
+kgk --db knowledge.db search -n project:mina -q "Tokyo"
 
 # Path
-kgk path --start <id1> --end <id2> --db knowledge.db
+kgk --db knowledge.db path -n project:mina --start <id1> --end <id2>
 
 # Replay
-kgk replay --db knowledge.db
+kgk --db knowledge.db replay
 ```

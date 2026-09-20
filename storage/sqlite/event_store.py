@@ -71,6 +71,13 @@ class SqliteEventStore:
         )
         return [self._row_to_event(r) for r in cursor.fetchall()]
 
+    def events_since(self, timestamp: datetime) -> list[KnowledgeEvent]:
+        cursor = self._conn.execute(
+            "SELECT * FROM events WHERE timestamp >= ? ORDER BY timestamp ASC",
+            (timestamp.isoformat(),),
+        )
+        return [self._row_to_event(r) for r in cursor.fetchall()]
+
     def all_events(self) -> list[KnowledgeEvent]:
         cursor = self._conn.execute("SELECT * FROM events ORDER BY timestamp ASC")
         return [self._row_to_event(r) for r in cursor.fetchall()]

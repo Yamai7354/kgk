@@ -135,7 +135,14 @@ class EntityService:
 
         return matches
 
-    def merge(self, canonical_id: str, duplicate_ids: list[str]) -> ConsolidationResult:
+    def merge(
+        self,
+        canonical_id: str,
+        duplicate_ids: list[str],
+        *,
+        actor: str = "system",
+        namespace: str = "global",
+    ) -> ConsolidationResult:
         # Filter out self-merges
         valid_dups = [d for d in duplicate_ids if d != canonical_id]
         if not valid_dups:
@@ -152,7 +159,9 @@ class EntityService:
                     )
                 curr = e.merged_into if e else None
 
-        return self._consolidation.merge_entities(canonical_id, valid_dups)
+        return self._consolidation.merge_entities(
+            canonical_id, valid_dups, actor=actor, namespace=namespace
+        )
 
     def _resolve_merge_chain(self, entity_id: str) -> Entity:
         visited = {entity_id}

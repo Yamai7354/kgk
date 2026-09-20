@@ -39,6 +39,10 @@ class ConsolidationService:
             raise KeyError(f"Canonical entity not found: {canonical_id}")
         if canonical.merged_into is not None:
             raise ValueError(f"Entity {canonical_id} was already merged away")
+        if canonical.namespace != namespace:
+            raise PermissionError(
+                f"Canonical entity is in {canonical.namespace!r}, not {namespace!r}"
+            )
 
         merged: list[str] = []
         rewired: list[Statement] = []
@@ -49,6 +53,8 @@ class ConsolidationService:
             duplicate = self._store.get_entity(dup_id)
             if duplicate is None:
                 raise KeyError(f"Duplicate entity not found: {dup_id}")
+            if duplicate.namespace != namespace:
+                raise PermissionError("Entity consolidation cannot cross namespace boundaries")
 
             tombstone = duplicate.model_copy(
                 update={"merged_into": canonical_id, "updated_at": _utcnow()}
@@ -57,6 +63,8 @@ class ConsolidationService:
             merged.append(dup_id)
 
             for stmt in self._store.all_statements(status=StatementStatus.ACTIVE):
+                if stmt.namespace != namespace:
+                    continue
                 updated = self._rewire_statement(stmt, dup_id, canonical_id)
                 if updated is not None:
                     self._store.update_statement(updated)

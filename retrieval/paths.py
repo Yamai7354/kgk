@@ -19,10 +19,15 @@ class PathFinder:
         *,
         max_depth: int = 4,
         directed: bool = True,
+        namespaces: str | list[str] | None = None,
     ) -> list[RetrievalResult] | None:
         """Finds the shortest path of statements connecting start_entity_id to end_entity_id."""
         paths = self.find_all_paths(
-            start_entity_id, end_entity_id, max_depth=max_depth, directed=directed
+            start_entity_id,
+            end_entity_id,
+            max_depth=max_depth,
+            directed=directed,
+            namespaces=namespaces,
         )
         if not paths:
             return None
@@ -36,12 +41,20 @@ class PathFinder:
         max_depth: int = 3,
         directed: bool = True,
         predicate_whitelist: list[str] | None = None,
+        namespaces: str | list[str] | None = None,
     ) -> list[list[RetrievalResult]]:
         """Finds all paths of statement hops from start_entity_id to end_entity_id up to max_depth."""
         if start_entity_id == end_entity_id:
             return []
 
         whitelist = set(predicate_whitelist) if predicate_whitelist else None
+        allowed_namespaces = (
+            None
+            if namespaces is None
+            else {namespaces}
+            if isinstance(namespaces, str)
+            else set(namespaces)
+        )
         all_paths: list[list[RetrievalResult]] = []
 
         # Queue contains: (current_node_id, path_of_results, visited_node_ids)
@@ -57,6 +70,8 @@ class PathFinder:
 
             # Forward edges (subject -> object)
             for stmt in self._store.statements_for_subject(curr_id, status=StatementStatus.ACTIVE):
+                if allowed_namespaces is not None and stmt.namespace not in allowed_namespaces:
+                    continue
                 rel = self._store.get_relation(stmt.relation_id)
                 if whitelist and rel and rel.label not in whitelist:
                     continue
@@ -75,6 +90,8 @@ class PathFinder:
                 for stmt in self._store.statements_for_object(
                     curr_id, status=StatementStatus.ACTIVE
                 ):
+                    if allowed_namespaces is not None and stmt.namespace not in allowed_namespaces:
+                        continue
                     rel = self._store.get_relation(stmt.relation_id)
                     if whitelist and rel and rel.label not in whitelist:
                         continue

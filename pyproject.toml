@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "knowledge-graph-kernel"
-version = "1.0.0"
+version = "1.1.0"
 description = "A modular, event-sourced Knowledge Graph Kernel library with temporal modeling, epistemic perspectives, persistent storage, and downstream client frameworks."
 readme = "README.md"
 requires-python = ">=3.10"

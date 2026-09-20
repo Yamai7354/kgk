@@ -47,7 +47,13 @@ from models import (
     StatementCreate,
     StatementStatus,
 )
-from namespaces import Namespace, NamespaceManager, NamespacePolicy
+from namespaces import (
+    Namespace,
+    NamespaceAccessError,
+    NamespaceManager,
+    NamespacePolicy,
+    NamespaceScope,
+)
 from ontology import RelationDefinition, RelationRegistry
 from provenance import ProvenanceEvent, ProvenanceRecord, ProvenanceTracker, Source
 from retraction import RetractionResult, RetractionService
@@ -63,7 +69,7 @@ from retrieval import (
 from storage.sqlite import SqliteEventStore, SqliteGraphStore
 from temporal import TemporalEngine, TimeInterval
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __all__ = [
     # Kernel
@@ -106,6 +112,8 @@ __all__ = [
     # Namespaces & Ontology
     "Namespace",
     "NamespaceManager",
+    "NamespaceScope",
+    "NamespaceAccessError",
     "NamespacePolicy",
     "RelationDefinition",
     "RelationRegistry",

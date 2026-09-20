@@ -12,6 +12,7 @@ def _utcnow() -> datetime:
 
 
 class EventType(str, Enum):
+    NAMESPACE_REGISTER = "namespace_register"
     ASSERT = "assert"
     RETRACT = "retract"
     SUPERSEDE = "supersede"

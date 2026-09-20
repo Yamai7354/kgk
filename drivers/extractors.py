@@ -131,7 +131,7 @@ class StructuredJsonExtractor:
                 continue
 
             # If scalar value
-            if isinstance(val, (str, int, float, bool)):
+            if isinstance(val, str | int | float | bool):
                 prov = ProvenanceRecord(
                     source=document.source_type,
                     source_id=document.id,
@@ -152,7 +152,7 @@ class StructuredJsonExtractor:
             # If list of values
             elif isinstance(val, list):
                 for item in val:
-                    if isinstance(item, (str, int, float)):
+                    if isinstance(item, str | int | float):
                         prov = ProvenanceRecord(
                             source=document.source_type,
                             source_id=document.id,
